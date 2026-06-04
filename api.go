@@ -2,13 +2,13 @@ package scratchdb
 
 import (
 	"os"
+	"path/filepath"
 	uuid "github.com/google/uuid"
 )
 
 type ScratchDB struct {
-	// TODO 1: Fill in ScratchDB struct. What does ScratchDB need to hold internally?
 	dir				string
-	keyDir			map[uuid.UUID][]byte
+	keyDir			map[string][]byte
 	activeFile		string
 	options			Options
 }
@@ -24,17 +24,16 @@ func createEmptyFile(name string) error {
 	return err
 }
 
-// TODO 2: implement Open function
 func Open(directoryName string, options Options) (*ScratchDB, error) {
 	var err error
 
 	err = os.Mkdir(directoryName, 0755)
 
-	if err != nil {
+	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
 
-	dataFile := uuid.NewString()
+	dataFile := filepath.Join(directoryName, uuid.NewString())
 
 	err = createEmptyFile(dataFile)
 
@@ -44,7 +43,7 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 
 	newDB := ScratchDB{
 		dir:				directoryName,
-		keyDir:				make(map[uuid.UUID][]byte),
+		keyDir:				make(map[string][]byte),
 		activeFile:			dataFile,
 		options:			options,
 	}
@@ -52,8 +51,8 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 	return &newDB, err
 }
 
-func (db *ScratchDB) Get(key []byte) ([]byte, error)
 func (db *ScratchDB) Put(key []byte, value []byte) error
+func (db *ScratchDB) Get(key []byte) ([]byte, error) 
 func (db *ScratchDB) Delete(key []byte) error
 func (db *ScratchDB) ListKeys() ([][]byte, error)
 func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
