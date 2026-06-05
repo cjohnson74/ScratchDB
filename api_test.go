@@ -5,7 +5,6 @@ import (
 	"os"
 )
 
-// TODO 3: Add unit table-driven tests of Open function
 func TestOpenDB(t *testing.T) {
 	defer os.RemoveAll("test")
 
@@ -31,8 +30,28 @@ func TestOpenDB(t *testing.T) {
 	}
 }
 
-func TestOpenCloseOpen(t *testing.T) {}
+func TestOpenCloseOpen(t *testing.T) {
+	defer os.RemoveAll("test")
+
+	testDB, err := Open("test", Options{true, true})
+	if err != nil {
+		t.Fatalf("failed to open: %v", err)
+	}
+
+	err = testDB.Close()
+	if err != nil {
+		t.Fatalf("failed to close: %v", err)
+	}
+
+	testDB, err = Open("test", Options{true, true})
+	if err != nil {
+		t.Fatalf("failed to open existing: %v", err)
+	}
+}
 
 func TestOpenPut(t *testing.T) {}
 
 func TestNotOpenPut(t *testing.T) {}
+
+// TODO 3: Only one process can have ReadWrite: true
+func TestReadWriterConflict(t *testing.T) {}

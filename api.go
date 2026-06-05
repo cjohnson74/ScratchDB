@@ -3,14 +3,33 @@ package scratchdb
 import (
 	"os"
 	"path/filepath"
+
 	uuid "github.com/google/uuid"
 )
 
 type ScratchDB struct {
-	dir				string
-	keyDir			map[string][]byte
-	activeFile		string
-	options			Options
+	dir					string
+	keyDir				map[string]keyDirEntry
+	activeFile			string
+	activeFileHandle	*os.File
+	options				Options
+	lockFile			*os.File
+}
+
+type entry struct {
+	crc			uint32
+	timeStamp	uint32
+	keySize		uint32
+	valueSize	uint32
+	key			[]byte
+	value		[]byte
+}
+
+type keyDirEntry struct {
+	fileId		string
+	valueSize	uint32	
+	valuePos	int64
+	timeStamp	uint32
 }
 
 type Options struct {
@@ -18,14 +37,32 @@ type Options struct {
 	SyncOnPut	bool
 }
 
-func createEmptyFile(name string) error {
-	d := []byte("")
-	err := os.WriteFile(name, d, 0644)
-	return err
+func getActiveFile(directoryName string, fileErr error) (string, error){
+	var gerr error
+	var activeFile string
+
+	if os.IsExist(fileErr) {
+		matches, gerr := filepath.Glob(filepath.Join(directoryName, "active_*"))
+		if gerr != nil {
+			return "", gerr
+		}
+		if len(matches) > 0 {
+			activeFile = matches[0]
+		}
+	}
+
+	return activeFile, gerr
 }
 
+// TODO 1: Implement only one process can have ReadWrite: true
+// You will want to hold the lockFile handle open for the entire
+// duration the db is open, this is how you enforce single-writer.
+// On Unix systems, you can use locker (flock) on the open handle,
+// to prevent another process from aquiring it.
 func Open(directoryName string, options Options) (*ScratchDB, error) {
 	var err error
+	var dataFile string
+	var fileHandle *os.File
 
 	err = os.Mkdir(directoryName, 0755)
 
@@ -33,9 +70,19 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 		return nil, err
 	}
 
-	dataFile := filepath.Join(directoryName, uuid.NewString())
+	dataFile, err = getActiveFile(directoryName, err)
 
-	err = createEmptyFile(dataFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if dataFile == "" {
+		dataFile = filepath.Join(directoryName, "active_"+uuid.NewString())
+		fileHandle, err = os.OpenFile(dataFile, os.O_RDWR|os.O_CREATE, 0644)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	if err != nil {
 		return nil, err
@@ -43,8 +90,9 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 
 	newDB := ScratchDB{
 		dir:				directoryName,
-		keyDir:				make(map[string][]byte),
+		keyDir:				make(map[string]keyDirEntry),
 		activeFile:			dataFile,
+		activeFileHandle:	fileHandle,
 		options:			options,
 	}
 
@@ -58,4 +106,7 @@ func (db *ScratchDB) ListKeys() ([][]byte, error)
 func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
 func (db *ScratchDB) Merge(directoryName string) error
 func (db *ScratchDB) Sync() error
-func (db *ScratchDB) Close() error
+// TODO 2: Close the lockFile
+func (db *ScratchDB) Close() error {
+	return db.activeFileHandle.Close()
+}
