@@ -5,6 +5,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
+	"hash/crc32"
+	"encoding/binary"
 
 	"github.com/gofrs/flock" // TODO 1: Switch the syscall package
 	"github.com/google/uuid"
@@ -16,6 +19,7 @@ type ScratchDB struct {
 	activeFile			string
 	activeFileHandle	*os.File
 	options				Options
+	isClosed			bool
 	lockFile			*flock.Flock
 }
 
@@ -31,7 +35,7 @@ type entry struct {
 type keyDirEntry struct {
 	fileId		string
 	valueSize	uint32	
-	valuePos	int64
+	valuePos	uint64
 	timeStamp	uint32
 }
 
@@ -53,6 +57,44 @@ func getFile(directoryName string, filePattern string) (string, error){
 	}
 
 	return file, gerr
+}
+
+func constructEntry(key []byte, value []byte) (valueSize uint32, valuePos uint32, timestamp uint32, entry []byte) {
+	timestampBuff := make([]byte, 4)
+	keySizeBuff := make([]byte, 2)
+	valueSizeBuff := make([]byte, 4)
+	crcBuff := make([]byte, 4)
+	keySize := uint16(len(key))
+	valueSize = uint32(len(value))
+	timestamp = uint32(time.Now().Unix())
+
+	binary.BigEndian.PutUint32(timestampBuff, timestamp)
+	binary.BigEndian.PutUint16(keySizeBuff, keySize)
+	binary.BigEndian.PutUint32(valueSizeBuff, valueSize)
+
+	entry = make([]byte, 0, len(timestampBuff)+len(keySizeBuff)+len(valueSizeBuff)+len(key)+len(value))
+	entry = append(entry, timestampBuff...)
+	entry = append(entry, keySizeBuff...)
+	entry = append(entry, valueSizeBuff...)
+	entry = append(entry, key...)
+	entry = append(entry, value...)
+
+	checksum := crc32.ChecksumIEEE(entry)
+	binary.BigEndian.PutUint32(crcBuff, checksum)
+
+	entry = append(crcBuff, entry...)
+	valuePos = uint32(len(entry) - len(value))
+
+	return valueSize, valuePos, timestamp, entry
+}
+
+func getActiveFileLen(activeFileHandle *os.File) (fileLen uint32, err error) {
+	fi, err := activeFileHandle.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	return uint32(fi.Size()), nil
 }
 
 func Open(directoryName string, options Options) (*ScratchDB, error) {
@@ -103,21 +145,50 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 		activeFile:			dataFile,
 		activeFileHandle:	activeFileHandle,
 		options:			options,
+		isClosed:			false,
 		lockFile:			lockFile,
 	}
 
 	return &newDB, err
 }
 
-// TODO 2: Implement put method
-func (db *ScratchDB) Put(key []byte, value []byte) error
-func (db *ScratchDB) Get(key []byte) ([]byte, error) 
-func (db *ScratchDB) Delete(key []byte) error
-func (db *ScratchDB) ListKeys() ([][]byte, error)
-func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
-func (db *ScratchDB) Merge(directoryName string) error
-func (db *ScratchDB) Sync() error
+func (db *ScratchDB) Put(key []byte, value []byte) error {
+	if !db.options.ReadWrite {
+		return fmt.Errorf("DB does not have write access.")
+	} else if db.isClosed {
+		return fmt.Errorf("Cannot Put when DB is closed.")
+	}
+
+	activeFileLen, err := getActiveFileLen(db.activeFileHandle)
+	if err != nil {
+		return err
+	}
+
+	valueSize, valuePos, timestamp, entry := constructEntry(key, value)
+	_, err = db.activeFileHandle.Write(entry)
+	if err != nil {
+		return err
+	}
+
+	if db.options.SyncOnPut {
+		db.activeFileHandle.Sync()
+	}
+
+	db.keyDir[string(key)] = keyDirEntry{db.activeFile, valueSize, uint64(activeFileLen)+uint64(valuePos), timestamp}
+	
+	return err
+}
+
+// func (db *ScratchDB) Get(key []byte) ([]byte, error) 
+// func (db *ScratchDB) Delete(key []byte) error
+// func (db *ScratchDB) ListKeys() ([][]byte, error)
+// func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
+// func (db *ScratchDB) Merge(directoryName string) error
+// func (db *ScratchDB) Sync() error
 func (db *ScratchDB) Close() error {
-	db.lockFile.Unlock()
+	if db.lockFile != nil {
+		db.lockFile.Unlock()
+	}
+	db.isClosed = true
 	return db.activeFileHandle.Close()
 }
