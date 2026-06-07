@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"testing"
+	"slices"
 )
 
 func outputContentsOfDB(testDB *ScratchDB) error {
@@ -243,5 +244,37 @@ func TestDelete(t *testing.T) {
 	outErr = outputContentsOfDB(testDB)
 	if outErr != nil {
 		t.Fatalf("failed to output DB contents after delete. %v", err)
+	}
+}
+
+func TestListKeys(t *testing.T) {
+	defer os.RemoveAll("test")
+
+	testDB, err := Open("test", Options{true, true})
+	if err != nil {
+		t.Fatalf("failed to open DB: %v", err)
+	}
+	defer testDB.Close()
+
+	key1, value1 := []byte("Carson Johnson"), []byte("Pizza")
+	key2, value2 := []byte("Genesis Velasquez"), []byte("Tip Top")
+	keys := []string{string(key1), string(key2)}
+
+	putErr := testDB.Put(key1, value1)
+	if putErr != nil {
+		t.Fatalf("failed to put in DB: %v", putErr)
+	}
+
+	putErr = testDB.Put(key2, value2)
+	if putErr != nil {
+		t.Fatalf("failed to put in DB: %v", putErr)
+	}
+
+	dbKeys, err := testDB.ListKeys()
+
+	slices.Sort(dbKeys)
+	slices.Sort(keys)
+	if !slices.Equal(dbKeys, keys) {
+		t.Fatalf("failed to ListKeys: %v != %v", dbKeys, keys)
 	}
 }
