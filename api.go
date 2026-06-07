@@ -1,14 +1,15 @@
 package scratchdb
 
 import (
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
+	"io"
 	"log"
 	"os"
-	"io"
 	"path/filepath"
+	"strings"
 	"time"
-	"hash/crc32"
-	"encoding/binary"
 
 	"github.com/gofrs/flock" // TODO 2: Switch to syscall package
 	"github.com/google/uuid"
@@ -174,7 +175,9 @@ func (db *ScratchDB) Put(key []byte, value []byte) error {
 		db.activeFileHandle.Sync()
 	}
 
-	db.keyDir[string(key)] = KeyDirEntry{db.activeFile, valueSize, uint64(activeFileLen)+uint64(valuePos), timestamp}
+	fileId := strings.Replace(db.activeFile, string(db.dir+"/"+"active_"), "", 1)
+
+	db.keyDir[string(key)] = KeyDirEntry{fileId, valueSize, uint64(activeFileLen)+uint64(valuePos), timestamp}
 	
 	return err
 }
@@ -199,7 +202,11 @@ func (db *ScratchDB) Get(key []byte) ([]byte, error) {
 	return valueBuff, nil
 }
 
-// func (db *ScratchDB) Delete(key []byte) error
+// TODO 1: Implement Delete method
+// func (db *ScratchDB) Delete(key []byte) error {
+	
+// }
+
 // func (db *ScratchDB) ListKeys() ([][]byte, error)
 // func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
 // func (db *ScratchDB) Merge(directoryName string) error
