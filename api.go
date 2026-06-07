@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"io"
 	"path/filepath"
 	"time"
 	"hash/crc32"
 	"encoding/binary"
 
-	"github.com/gofrs/flock" // TODO 1: Switch the syscall package
+	"github.com/gofrs/flock" // TODO 2: Switch to syscall package
 	"github.com/google/uuid"
 )
 
 type ScratchDB struct {
 	dir					string
-	keyDir				map[string]keyDirEntry
+	keyDir				map[string]KeyDirEntry
 	activeFile			string
 	activeFileHandle	*os.File
 	options				Options
@@ -23,7 +24,7 @@ type ScratchDB struct {
 	lockFile			*flock.Flock
 }
 
-type entry struct {
+type Entry struct {
 	crc			uint32
 	timeStamp	uint32
 	keySize		uint32
@@ -32,7 +33,7 @@ type entry struct {
 	value		[]byte
 }
 
-type keyDirEntry struct {
+type KeyDirEntry struct {
 	fileId		string
 	valueSize	uint32	
 	valuePos	uint64
@@ -45,18 +46,17 @@ type Options struct {
 }
 
 func getFile(directoryName string, filePattern string) (string, error){
-	var gerr error
 	var file string
 
-	matches, gerr := filepath.Glob(filepath.Join(directoryName, filePattern))
-	if gerr != nil {
-		return "", gerr
+	matches, err := filepath.Glob(filepath.Join(directoryName, filePattern))
+	if err != nil {
+		return "", err
 	}
 	if len(matches) > 0 {
 		file = matches[0]
 	}
 
-	return file, gerr
+	return file, err
 }
 
 func constructEntry(key []byte, value []byte) (valueSize uint32, valuePos uint32, timestamp uint32, entry []byte) {
@@ -141,7 +141,7 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 
 	newDB := ScratchDB{
 		dir:				directoryName,
-		keyDir:				make(map[string]keyDirEntry),
+		keyDir:				make(map[string]KeyDirEntry),
 		activeFile:			dataFile,
 		activeFileHandle:	activeFileHandle,
 		options:			options,
@@ -174,17 +174,37 @@ func (db *ScratchDB) Put(key []byte, value []byte) error {
 		db.activeFileHandle.Sync()
 	}
 
-	db.keyDir[string(key)] = keyDirEntry{db.activeFile, valueSize, uint64(activeFileLen)+uint64(valuePos), timestamp}
+	db.keyDir[string(key)] = KeyDirEntry{db.activeFile, valueSize, uint64(activeFileLen)+uint64(valuePos), timestamp}
 	
 	return err
 }
 
-// func (db *ScratchDB) Get(key []byte) ([]byte, error) 
+func (db *ScratchDB) Get(key []byte) ([]byte, error) {
+	keyDirEntry, ok := db.keyDir[string(key)]
+	if !ok {
+		return nil, fmt.Errorf("failed to get value from keyDir at key: %s", string(key))
+	}
+
+	valueBuff := make([]byte, keyDirEntry.valueSize)
+	_, err := db.activeFileHandle.Seek(int64(keyDirEntry.valuePos), io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.activeFileHandle.Read(valueBuff)
+	if err != nil {
+		return nil, err
+	}
+
+	return valueBuff, nil
+}
+
 // func (db *ScratchDB) Delete(key []byte) error
 // func (db *ScratchDB) ListKeys() ([][]byte, error)
 // func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
 // func (db *ScratchDB) Merge(directoryName string) error
 // func (db *ScratchDB) Sync() error
+
 func (db *ScratchDB) Close() error {
 	if db.lockFile != nil {
 		db.lockFile.Unlock()

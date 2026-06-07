@@ -131,7 +131,6 @@ func TestReadWriterConflict(t *testing.T) {
 	defer os.RemoveAll("test")
 
 	testDB1, err := Open("test", Options{true, true})
-	log.Println(testDB1.options.ReadWrite)
 	if err != nil {
 		t.Fatalf("failed to open DB1: %v", err)
 	}
@@ -144,5 +143,29 @@ func TestReadWriterConflict(t *testing.T) {
 	}
 	if err2 == nil {
 		t.Fatalf("expected error opening second writer, got nil")
+	}
+}
+
+func TestGet(t *testing.T) {
+	defer os.RemoveAll("test")
+
+	testDB, err := Open("test", Options{true, true})
+	if err != nil {
+		t.Fatalf("failed to open DB: %v", err)
+	}
+	defer testDB.Close()
+
+	key := []byte("Carson Johnson")
+	value := []byte("Pizza")
+
+	putErr := testDB.Put(key, value)
+	if putErr != nil {
+		t.Fatalf("failed to put in DB: %v", putErr)
+	}
+
+	value, getErr := testDB.Get(key)
+	log.Printf("%s", value)
+	if getErr != nil {
+		t.Fatalf("failed to get from DB: %v", getErr)
 	}
 }
