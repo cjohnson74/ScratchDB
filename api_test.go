@@ -6,6 +6,16 @@ import (
 	"testing"
 )
 
+func outputContentsOfDB(testDB *ScratchDB) error {
+	log.Printf("KeyDir %v", testDB.keyDir)
+	entry, err := os.ReadFile(testDB.activeFile)
+	if err != nil {
+		return err
+	}
+	log.Printf("Active File Contents: %s", string(entry))
+	return nil
+}
+
 func TestOpenDB(t *testing.T) {
 	defer os.RemoveAll("test")
 
@@ -104,7 +114,6 @@ func TestNotOpenPut(t *testing.T) {
 	value := []byte("Pizza")
 
 	putErr := testDB.Put(key, value)
-
 	if putErr == nil {
 		t.Fatalf("expected put to fail on closed DB: %v", putErr)
 	}
@@ -124,6 +133,40 @@ func TestNoWritePut(t *testing.T) {
 	putErr := testDB.Put(key, value)
 	if putErr == nil {
 		t.Fatalf("expected put to fail with DB ReadWrite false: %v", putErr)
+	}
+}
+
+func TestPutPut(t *testing.T) {
+	defer os.RemoveAll("test")
+	testDB, err := Open("test", Options{true, true})
+	if err != nil {
+		t.Fatalf("failed to open DB: %v", err)
+	}
+	defer testDB.Close()
+
+	key := []byte("Carson Johnson")
+	value := []byte("Pizza")
+
+	putErr := testDB.Put(key, value)
+	if putErr != nil {
+		t.Fatalf("failed to put: %v", putErr)
+	}
+
+	outErr := outputContentsOfDB(testDB)
+	if outErr != nil {
+		t.Fatalf("failed to output DB contents after put. %v", outErr)
+	}
+
+	newValue := []byte("Steak")
+
+	putErr = testDB.Put(key, newValue)
+	if putErr != nil {
+		t.Fatalf("failed to put to an existing key: %v", putErr)
+	}
+
+	outErr = outputContentsOfDB(testDB)
+	if outErr != nil {
+		t.Fatalf("failed to output DB contents after put. %v", err)
 	}
 }
 
@@ -167,5 +210,38 @@ func TestGet(t *testing.T) {
 	log.Printf("%s", value)
 	if getErr != nil {
 		t.Fatalf("failed to get from DB: %v", getErr)
+	}
+}
+
+func TestDelete(t *testing.T) {
+	defer os.RemoveAll("test")
+
+	testDB, err := Open("test", Options{true, true})
+	if err != nil {
+		t.Fatalf("failed to open DB: %v", err)
+	}
+	defer testDB.Close()
+
+	key := []byte("Carson Johnson")
+	value := []byte("Pizza")
+
+	putErr := testDB.Put(key, value)
+	if putErr != nil {
+		t.Fatalf("failed to put in DB: %v", putErr)
+	}
+
+	outErr := outputContentsOfDB(testDB)
+	if outErr != nil {
+		t.Fatalf("failed to output DB contents after put. %v", err)
+	}
+
+	delErr := testDB.Delete(key)
+	if delErr != nil {
+		t.Fatalf("failed to delete from DB: %v", delErr)
+	}
+
+	outErr = outputContentsOfDB(testDB)
+	if outErr != nil {
+		t.Fatalf("failed to output DB contents after delete. %v", err)
 	}
 }

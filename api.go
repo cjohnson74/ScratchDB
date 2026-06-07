@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/flock" // TODO 2: Switch to syscall package
+	"github.com/gofrs/flock" // TODO 1: Switch to syscall package
 	"github.com/google/uuid"
 )
+
+const TOMBSTONE = "-tombstone-"
 
 type ScratchDB struct {
 	dir					string
@@ -202,15 +204,26 @@ func (db *ScratchDB) Get(key []byte) ([]byte, error) {
 	return valueBuff, nil
 }
 
-// TODO 1: Implement Delete method
-// func (db *ScratchDB) Delete(key []byte) error {
+func (db *ScratchDB) Delete(key []byte) error {
+	_, ok := db.keyDir[string(key)]
+	if !ok {
+		return fmt.Errorf("Key does not exist in DB")
+	}
+
+	_, _, _, entry := constructEntry(key, []byte(TOMBSTONE))
+	_, err := db.activeFileHandle.Write(entry)
+	if err != nil {
+		return err
+	}
 	
-// }
+	delete(db.keyDir, string(key))
+	return nil
+}
 
 // func (db *ScratchDB) ListKeys() ([][]byte, error)
+// func (db *ScratchDB) Sync() error
 // func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
 // func (db *ScratchDB) Merge(directoryName string) error
-// func (db *ScratchDB) Sync() error
 
 func (db *ScratchDB) Close() error {
 	if db.lockFile != nil {
