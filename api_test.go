@@ -278,3 +278,36 @@ func TestListKeys(t *testing.T) {
 		t.Fatalf("failed to ListKeys: %v != %v", dbKeys, keys)
 	}
 }
+
+func TestSync(t *testing.T) {
+	defer os.RemoveAll("test")
+
+	testDB, err := Open("test", Options{true, false})
+	if err != nil {
+		t.Fatalf("failed to open DB: %v", err)
+	}
+	defer testDB.Close()
+
+	testDB.Put([]byte("key"), []byte("value"))
+	
+	if err := testDB.Sync(); err != nil {
+		t.Fatalf("file sync failed: %v", err)
+	}
+
+	outputContentsOfDB(testDB)
+
+	testDB.Close()
+
+	testDB2, _ := Open("test", Options{true, false})
+	if err != nil {
+		t.Fatalf("failed to open DB2: %v", err)
+	}
+	defer testDB2.Close()
+
+	outputContentsOfDB(testDB2)
+
+	value, _ := testDB2.Get([]byte("key"))
+	if string(value) != "value" {
+		t.Fatalf("data lost after sync and reopen")
+	}
+}

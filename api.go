@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ type ScratchDB struct {
 type Entry struct {
 	crc			uint32
 	timeStamp	uint32
-	keySize		uint32
+	keySize		uint16
 	valueSize	uint32
 	key			[]byte
 	value		[]byte
@@ -100,6 +101,77 @@ func getActiveFileLen(activeFileHandle *os.File) (fileLen uint32, err error) {
 	return uint32(fi.Size()), nil
 }
 
+func rebuildKeyDir(db *ScratchDB, directoryName string) error {
+	// loop through files
+	err := filepath.WalkDir(directoryName, func(path string, d fs.DirEntry, err error) error {
+		if d.IsDir() {
+			return nil
+		}
+
+		// Check if file is empty to avoid panic
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() == 0 {
+			return nil
+		}
+
+		timeStampBuff := make([]byte, 4)
+		keySizeBuff := make([]byte, 2)
+		valueSizeBuff := make([]byte, 4)
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		var currPos uint64
+
+		for {
+			file.Seek(4, io.SeekCurrent)
+			currPos += 4
+
+			_, err := file.Read(timeStampBuff)
+			if err == io.EOF {
+				break
+			}
+			timeStamp := binary.BigEndian.Uint32(timeStampBuff)
+			currPos += 4
+
+			file.Read(keySizeBuff)
+			keySize := binary.BigEndian.Uint16(keySizeBuff)
+			currPos += 2
+
+			file.Read(valueSizeBuff)
+			valueSize := binary.BigEndian.Uint32(valueSizeBuff)
+			currPos += 4
+
+			keyBuff := make([]byte, keySize)
+			file.Read(keyBuff)
+			currPos += uint64(keySize)
+
+			valuePos := currPos
+
+			valueBuff := make([]byte, valueSize)
+			file.Read(valueBuff)
+			currPos += uint64(valueSize)
+
+			fileName := strings.Replace(file.Name(), string(db.dir+"/"+"active_"), "", 1)
+
+			db.keyDir[string(keyBuff)] = KeyDirEntry{fileName, uint32(valueSize), valuePos, timeStamp}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to rebuild keydir: %v", err)
+	}
+	
+	return nil
+}
+
 func Open(directoryName string, options Options) (*ScratchDB, error) {
 	var err error
 	var dataFile string
@@ -113,11 +185,9 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 		return nil, err
 	}
 
-	if os.IsExist(err) {
-		dataFile, err = getFile(directoryName, "active_*")
-		if err != nil {
-			return nil, err
-		}	
+	dataFile, err = getFile(directoryName, "active_*")
+	if err != nil {
+		return nil, err
 	}
 
 	if dataFile == "" {
@@ -152,6 +222,11 @@ func Open(directoryName string, options Options) (*ScratchDB, error) {
 		lockFile:			lockFile,
 	}
 
+	err = rebuildKeyDir(&newDB, directoryName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rebuild keydir: %v", err)
+	}
+
 	return &newDB, err
 }
 
@@ -169,6 +244,8 @@ func (db *ScratchDB) Put(key []byte, value []byte) error {
 
 	valueSize, valuePos, timestamp, entry := constructEntry(key, value)
 	_, err = db.activeFileHandle.Write(entry)
+	log.Printf("wrote %d bytes to %s", len(entry), db.activeFile)
+	log.Printf("entry bytes: %x", entry)
 	if err != nil {
 		return err
 	}
@@ -232,7 +309,10 @@ func (db *ScratchDB) ListKeys() ([]string, error) {
 	return keys, nil
 }
 
-// func (db *ScratchDB) Sync() error
+func (db *ScratchDB) Sync() error {
+	return db.activeFileHandle.Sync()
+}
+
 // func (db *ScratchDB) Fold(fn func(key []byte, value []byte, acc any) any, acc any) (any, error)
 // func (db *ScratchDB) Merge(directoryName string) error
 
